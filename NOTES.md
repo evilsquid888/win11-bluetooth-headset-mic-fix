@@ -2,8 +2,7 @@
 
 Raw timeline of the debugging session, including dead ends. Machine: ASUS Zenbook Duo
 (UX8406), Windows 11 Pro 26200, Intel Wireless Bluetooth `USB\VID_8087&PID_0037`
-(driver 24.50.0.4), Intel SST platform audio. Headsets: Sony WH-1000XM5
-(`88:C9:E8:03:8B:28`), Bose QC45 (`78:2B:64:9F:92:1D`).
+(driver 24.50.0.4), Intel SST platform audio. Headsets: Sony WH-1000XM5, Bose QC45.
 
 ## What broke it (traced after the fix)
 
