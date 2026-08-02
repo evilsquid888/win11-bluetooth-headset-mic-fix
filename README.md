@@ -67,10 +67,12 @@ own `ibtusb` INF writes `0` — and `bth.inf`'s value wins on configuration pass
 presumably how machines end up in offload mode, and it's why the registry fix gets
 **silently reverted** by driver updates or reinstalls.
 
-On the machine investigated, the breakage was traced (MsiInstaller + Kernel-PnP +
-`setupapi.dev.log` events) to an **Intel Wireless Bluetooth 24.50.0.4 MSI driver update
-installed minutes before the mic disappeared** — its configuration pass flipped the
-routing onto the offload path. Full forensic timeline in [NOTES.md](NOTES.md).
+On the machine investigated, forensics (Kernel-PnP log, VSS shadow-copy registry
+snapshots, and Windows' ~30-day ghost-device cleanup semantics) showed the offload
+path had been dead since a **Windows 11 feature update (build 26200) at the end of
+January and the Intel audio-driver refresh that followed it** — every later driver
+update and re-pair was just a fix attempt on top. Full forensic timeline in
+[NOTES.md](NOTES.md).
 
 ## Gotchas
 

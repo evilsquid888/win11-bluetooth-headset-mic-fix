@@ -7,31 +7,43 @@ Raw timeline of the debugging session, including dead ends. Machine: ASUS Zenboo
 
 ## What broke it (traced after the fix)
 
-The mic vanished **the same morning the user noticed**. Forensics:
+Initially the Intel Bluetooth 24.50.0.4 MSI installed at 09:21 the same morning
+looked like the culprit — the user then clarified it was **their own fix attempt**
+(as was disabling-then-not-re-enabling assorted devices that morning: a VSS shadow
+copy of the registry from the previous night showed the SST devices still enabled
+and `Sco Support Type` already `2`).
 
-- **09:21:52** — MsiInstaller (Application log): `Intel Bluetooth.msi` — "Intel(R)
-  Wireless Bluetooth(R)" **24.50.0.4** install begins (source extracted to
-  `C:\Program Files (x86)\Intel\Bluetooth\`, drivers added via
-  `pnputil /add-driver ... /install`, visible in `setupapi.dev.log`).
-- **09:22:01** — Kernel-PnP/Configuration log: adapter `USB\VID_8087&PID_0037`
-  **configured + started** → this configuration pass applied `bth.inf`'s
-  `Sco Support Type = 2`, putting HFP on the Intel SST offload path.
-- **09:22:10** — MsiInstaller: install complete, **restart required** (the machine
-  wasn't restarted until 19:11 — which also explains the "reboot needed" flags
-  encountered during the fix).
-- **~09:30** — user reports the missing mic.
+The real history, reconstructed from the Kernel-PnP/Configuration log, VSS shadow
+copies of the SYSTEM/SOFTWARE hives, and Windows' ~30-day ghost-device cleanup
+semantics:
 
-The Intel SST Bluetooth audio devices had been disabled (code 22) at some earlier,
-undetermined date. Two consistent readings: either the mic had worked until that
-morning because `Sco Support Type` was 0 (standard path) and the driver update
-flipped it to 2, colliding with the long-disabled SST devices; or offload was
-already on and working and the update broke its pipeline. The former fits the
-observed INF behavior (`bth.inf` re-applies 2 on every configuration pass).
+- **1/31/2026** — Windows 11 feature update to build 26200
+  (`Win32_OperatingSystem.InstallDate`).
+- **2/20–21** — Intel SST / Bluetooth audio driver refresh right after (PnP log
+  begins 2/20; SST BT devices configured+started 2/21 with "settings not migrated
+  from previous OS installation"). One pre-existing Headset endpoint from before
+  this date never logged another event — dead relic.
+- **3/3** — WH-1000XM5 paired; its Hands-Free endpoint devnode created. No
+  evidence it was ever active afterwards.
+- **4/13** — Windows' periodic stale-device cleanup deleted that endpoint. The
+  cleanup only reaps devices **not present ≥ ~30 days** → the mic endpoint had
+  been continuously dead since **mid-March at the latest**, likely since the 3/3
+  pairing.
+- **4/1, 4/30, 7/11** — user re-pairs (QC45, XM5×2); each endpoint recreated dead
+  (state 4). **5/18, 7/8** — further ghost-cleanups reap them again (the 7/8 pass
+  also deleted a phone, USB sticks, and a portable display in the same second —
+  clearly bulk phantom cleanup, not a targeted event).
+- **7/31 (VSS snapshot)** — all three Headset endpoints state 4; SST devices
+  enabled; `Sco Support Type = 2`. Broken-at-rest state, pre any fix attempts.
+- **8/1** — user's fix attempts (driver MSI install 09:21, device disabling),
+  then the actual fix (`Sco Support Type = 0` + restart + re-pair).
 
-Previous adapter configuration events: 4/16/2026 (prior BT driver) and 2/21/2026
-(SST BT audio devices installed/started). Installer's MSI client process was gone
-by investigation time; no Intel Driver & Support Assistant found installed, so the
-update was launched either manually or by an OEM updater (MyASUS et al.).
+**Conclusion:** the offload path never worked again after the late-January feature
+update / late-February Intel audio-driver refresh. Everything in between was fix
+attempts and Windows housekeeping on top of a path that had been dead since
+roughly February–March. Exact triggering event (OS update vs. the SST driver
+refresh that followed it) is not distinguishable from surviving logs — the PnP log
+only reaches back to 2/20 and Windows Update history had rolled over.
 
 ## Timeline
 
