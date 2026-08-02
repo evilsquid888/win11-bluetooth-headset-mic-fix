@@ -5,6 +5,34 @@ Raw timeline of the debugging session, including dead ends. Machine: ASUS Zenboo
 (driver 24.50.0.4), Intel SST platform audio. Headsets: Sony WH-1000XM5
 (`88:C9:E8:03:8B:28`), Bose QC45 (`78:2B:64:9F:92:1D`).
 
+## What broke it (traced after the fix)
+
+The mic vanished **the same morning the user noticed**. Forensics:
+
+- **09:21:52** — MsiInstaller (Application log): `Intel Bluetooth.msi` — "Intel(R)
+  Wireless Bluetooth(R)" **24.50.0.4** install begins (source extracted to
+  `C:\Program Files (x86)\Intel\Bluetooth\`, drivers added via
+  `pnputil /add-driver ... /install`, visible in `setupapi.dev.log`).
+- **09:22:01** — Kernel-PnP/Configuration log: adapter `USB\VID_8087&PID_0037`
+  **configured + started** → this configuration pass applied `bth.inf`'s
+  `Sco Support Type = 2`, putting HFP on the Intel SST offload path.
+- **09:22:10** — MsiInstaller: install complete, **restart required** (the machine
+  wasn't restarted until 19:11 — which also explains the "reboot needed" flags
+  encountered during the fix).
+- **~09:30** — user reports the missing mic.
+
+The Intel SST Bluetooth audio devices had been disabled (code 22) at some earlier,
+undetermined date. Two consistent readings: either the mic had worked until that
+morning because `Sco Support Type` was 0 (standard path) and the driver update
+flipped it to 2, colliding with the long-disabled SST devices; or offload was
+already on and working and the update broke its pipeline. The former fits the
+observed INF behavior (`bth.inf` re-applies 2 on every configuration pass).
+
+Previous adapter configuration events: 4/16/2026 (prior BT driver) and 2/21/2026
+(SST BT audio devices installed/started). Installer's MSI client process was gone
+by investigation time; no Intel Driver & Support Assistant found installed, so the
+update was launched either manually or by an OEM updater (MyASUS et al.).
+
 ## Timeline
 
 1. **Symptom**: headset mic gone from all apps; playback fine. Both paired headsets
