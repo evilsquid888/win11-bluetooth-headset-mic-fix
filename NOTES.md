@@ -76,6 +76,25 @@ only reaches back to 2/20 and Windows Update history had rolled over.
    normal **Restart** + **re-pair** → `Headset (WH-1000XM5)` endpoint went **state 1**.
    ✅ Mic visible in Teams.
 
+## Outcome
+
+Fixed and verified the same day (2026-08-01):
+
+- `Sco Support Type = 0` written with the adapter left untouched, full Restart,
+  XM5 removed and re-paired.
+- `Headset (WH-1000XM5)` capture endpoint went **state 1 (active)**; mic visible
+  and working in Teams. The value survived the reboot at 0.
+- The registry flip only sticks if nothing triggers a device reconfiguration
+  before the reboot — the first attempt was reverted (`bth.inf` re-applied 2)
+  because a pending configuration completed during an adapter enable. Second
+  attempt (write value, touch nothing, reboot) held.
+- Collateral incident during the first attempt: `Disable-PnpDevice` on the
+  adapter failed mid-cycle and left it stuck disabled → total Bluetooth outage,
+  recovered with elevated `pnputil /enable-device`. Lesson folded into the
+  "don't restart the adapter to apply this" guidance.
+- Old `Headset (WH-1000XM5 Hands-Free)` ghost endpoint remains, harmless. QC45
+  left un-re-paired (playback-only) by choice.
+
 ## Dead ends (don't bother)
 
 - Restarting audio services / endpoint builder — endpoint stays NOTPRESENT.

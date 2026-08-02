@@ -25,6 +25,9 @@ driver:
 3. **Remove and re-pair** the headset so its Hands-Free device is rebuilt on the new path.
 
 After this, the `Headset (…)` recording endpoint activates and apps can see the mic.
+Confirmed working on the machine below the same day: endpoint state went from
+"not present" to active, mic immediately visible in Teams, and the setting survived
+the reboot ([outcome details](NOTES.md#outcome)).
 
 ## Symptoms checklist
 
