@@ -1,3 +1,102 @@
+# Session notes — 2026-09-12
+
+Mic gone again on the same machine (Sony WH-1000XM5 connected, Bose QC45 paired but
+off), five weeks after the 2026-08-01 fix. Same symptom: playback fine, no `Headset`
+endpoint. State found before touching anything: `Sco Support Type = 2`, both
+`Hands-Free AG` devices on `HCIBYPASS`, no active `Headset` capture endpoint, both SST
+Bluetooth Audio devices `OK`, Intel BT driver still 24.50.0.4 (`oem194.inf`), fast
+startup on.
+
+## What happened, in order
+
+1. 07:5x — set `Sco Support Type = 0` (elevated), adapter untouched.
+2. 08:06:26 — user Restarted. Kernel start 08:06:44.
+3. **08:06:57 — the adapter's `Device Parameters` key was written** (registry
+   last-write timestamp, `RegQueryInfoKey`). Value afterwards: **`2`**.
+4. 08:07:06 — Kernel-PnP configured two new audio endpoints; the capture one is
+   `Headset (WH-1000XM5)` on the *Intel SST for Bluetooth Audio* interface, **state 1**.
+5. Mic works in apps. **No re-pair** — the XM5's `Hands-Free AG` is the same `HCIBYPASS`
+   device as before the reboot.
+
+So: the value did not survive the reboot (contradicting the 8/1 note below), the mic
+came back anyway, and it came back on the offload path.
+
+## What reverted the value (this is the part the 8/1 notes got wrong)
+
+Not INF ordering, not a driver update:
+
+- **No install or reconfiguration since 8/1.** Kernel-PnP/Configuration has no event
+  for the adapter after 2026-08-01 09:22; no UserPnp driver-install events; Windows
+  Update history since 7/31 is Defender definitions plus one "ASUSTeK System Driver
+  Update 3.1.70.0" on 8/30. `setupapi.dev.log` and its four rotated predecessors: the
+  last adapter install is the 8/1 09:22 one. Driver store has no `ibtusb` package newer
+  than 8/1.
+- **INFs.** All ten Intel `ibtusb` INFs in `C:\Windows\INF` (23.90.0.8, 24.20.0.3,
+  24.40.10.3 ×5, 24.50.0.4 ×3) set `Sco Support Type = 0` in `[AudOffload.HW.AddReg]`.
+  In-box `bth.inf` (10.0.26100.9444) sets `2` in `[BthPort_SidebandSco.NT.HW.AddReg]`,
+  referenced only from `[BthUsb_SidebandSco.NT.HW]`. Intel's `[ibtusb.HW]` does
+  `Include=bth.inf` / `Needs=BthUsb.NT.HW` — the *non*-sideband section. INF processing
+  cannot produce a `2` here.
+- **Who has the string.** UTF-16 `Sco Support Type` occurs in `ibtusb.sys` (every
+  flavour in `C:\Program Files (x86)\Intel\Bluetooth\drivers\ibtusb\*` and every driver
+  store copy), `ibtpci.sys`, and Microsoft's `bthport.sys`. It does **not** occur in
+  `IntcBTAu.sys` (SST BT audio) or in any Intel service binary (`ICPS\*`,
+  IntelAudioService, etc.). Adjacent strings in `ibtusb.sys`: `HfpOffloadDisable`,
+  `A2dpOffloadDisable`.
+- **Disassembly of `ibtusb.sys` 24.50.0.4** (`objdump`, WDF call table resolved by
+  index; addresses for image base `0x140000000`):
+  - `EvtDriverDeviceAdd = 0x140060BE0` (fed to `WDF_DRIVER_CONFIG_INIT` in DriverEntry).
+  - `0x14006B510`: `WdfDeviceOpenRegistryKey(dev, PLUGPLAY_REGKEY_DEVICE=1, KEY_READ)` →
+    `WdfRegistryQueryValue(L"HfpOffloadDisable")`, success iff DWORD == 1. That is the
+    **Device Parameters** key.
+  - `0x140071800(dev, value)`: opens the same key, `WdfRegistryAssignULong(L"Sco Support
+    Type", value)`. Three callers, all under DeviceAdd:
+    - `0x1400616B3` writes **0** when `HfpOffloadDisable == 1`;
+    - `0x14006CD83` / `0x14007B075` write **2** when the UEFI variable `UefiCnvBtAOLD`
+      yields 1 or 3 (platform audio offload enabled), else 0.
+  - No path through `InstallOrUpgrade` or the `CurrentDriverVersion` /
+    `PreviousDriverVersion` values; the write happens on every device add.
+  - `A2dpOffloadDisable` (`0x14006A170`) is read the same way and only logged.
+
+Conclusion: on this platform `ibtusb.sys` writes `2` on every boot and on every adapter
+enable (which is exactly what the 8/1 "pending configuration pass" was). The `0` we write
+is consumed once, at the next device add, and the observable effect is that the offload
+path comes up properly on that boot. Mechanism for *that* not traced.
+
+## Other things checked
+
+- Intel community threads about AX211 (24.20.0.3 killing all BT audio; rollback to
+  24.10.0.4) describe a different failure. Downgrading is pointless here: the device-add
+  logic is in every version in the store.
+- Windows boots since 8/1 (Kernel-General 12 / EventLog 6005): 8/1 ×4, 8/12 ×2,
+  9/9 02:51 + 02:52 (update install; `setupapi.dev.log` rotated 02:49), 9/9 19:02,
+  9/12 08:06. `BTHUSB` event 18 fires at every start/resume and is a handy marker.
+  Which of those boots killed the offload path is unknown — nothing logs it.
+- A scheduled-task watchdog to keep the value at `0` was drafted and then dropped:
+  the driver rewrites the value on every boot, so it would fight the wrong thing.
+
+## Permanent option (not yet exercised here)
+
+`HfpOffloadDisable = 1` (DWORD, adapter Device Parameters) → driver writes
+`Sco Support Type = 0` itself at every device add → HFP over HCI, SST offload out of the
+loop. Needs a Restart and a remove + re-pair of each headset (the `Hands-Free AG` device
+should then be created without `HCIBYPASS`). Reversible by deleting the value. Left
+unapplied on 9/12 because the quick fix had just restored the mic; apply next time it
+dies, or sooner.
+
+## Corrections to the 2026-08-01 notes below
+
+- "The value survived the reboot at 0" — it does not; see above. Success should be
+  judged by the endpoint state, not the value.
+- "Each already-paired headset stays on the old dead path until re-paired" — false for
+  the quick fix; the existing `HCIBYPASS` device came back to life. Re-pair is only
+  needed after `HfpOffloadDisable`.
+- "`bth.inf`'s `2` wins over Intel's `0` during configuration" — false; INFs are not
+  involved at runtime. Open item resolved.
+- "Driver updates may revert `Sco Support Type` to 2" — every boot does.
+
+---
+
 # Session notes — 2026-08-01
 
 Raw timeline of the debugging session, including dead ends. Machine: ASUS Zenbook Duo
@@ -82,7 +181,8 @@ Fixed and verified the same day (2026-08-01):
 - `Sco Support Type = 0` written with the adapter left untouched, full Restart,
   XM5 removed and re-paired.
 - `Headset (WH-1000XM5)` capture endpoint went **state 1 (active)**; mic visible
-  and working in Teams. The value survived the reboot at 0.
+  and working in Teams. The value survived the reboot at 0. *(2026-09-12: this
+  was wrong or a lucky read — the driver rewrites it at every boot; see top of file.)*
 - The registry flip only sticks if nothing triggers a device reconfiguration
   before the reboot — the first attempt was reverted (`bth.inf` re-applied 2)
   because a pending configuration completed during an adapter enable. Second
@@ -108,10 +208,11 @@ Fixed and verified the same day (2026-08-01):
   re-pair if its mic is ever needed. Playback unaffected.
 - The old dead endpoint `Headset (WH-1000XM5 Hands-Free)` lingers at state 4 as a
   harmless ghost entry; the live one is `Headset (WH-1000XM5)`.
-- Unverified hypothesis: which INF ordering rule makes `bth.inf`'s `2` win over
-  Intel's `0` during configuration. Practical consequence confirmed twice, mechanism
-  not chased down.
-- Watch item: next Intel BT driver update may revert `Sco Support Type` to 2.
+- ~~Unverified hypothesis: which INF ordering rule makes `bth.inf`'s `2` win over
+  Intel's `0` during configuration.~~ Resolved 2026-09-12: no INF rule; `ibtusb.sys`
+  writes it on every device add.
+- ~~Watch item: next Intel BT driver update may revert `Sco Support Type` to 2.~~ Every
+  boot does. Watch the endpoint state instead.
 
 ## Live endpoint enumeration snippet
 
